@@ -1,0 +1,2082 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Truck Spot — Track Street Food in Real Time</title>
+  <meta name="description" content="Discover the best nearby food trucks in real time. Browse live locations, menus, and operating hours with Truck Spot." />
+
+  <!-- Google Fonts: Plus Jakarta Sans (Display) & Inter (Body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            flame: '#FF521B',
+            'flame-dark': '#E03E0B',
+            amberwarm: '#FFB703',
+            charcoal: '#161925',
+            'charcoal-light': '#23283B',
+            cream: '#FFF9F5',
+            fresh: '#10B981',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            display: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+          },
+          boxShadow: {
+            'soft': '0 10px 30px -10px rgba(22, 25, 37, 0.08)',
+            'card': '0 14px 36px -12px rgba(22, 25, 37, 0.10)',
+            'glow': '0 12px 32px -6px rgba(255, 82, 27, 0.35)',
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Leaflet.js CSS CDN for Interactive Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+  <!-- Minimal Custom Styles for Leaflet Markers, Animations & Mobile Carousel -->
+  <style>
+    body {
+      background-color: #FFF9F5;
+      color: #161925;
+      overflow-x: hidden;
+    }
+
+    /* Live pulse animation for map markers & status dots */
+    @keyframes pulseRing {
+      0% {
+        transform: scale(0.85);
+        opacity: 0.75;
+      }
+      70% {
+        transform: scale(1.85);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1.85);
+        opacity: 0;
+      }
+    }
+
+    @keyframes floatSlow {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+    }
+
+    .animate-float {
+      animation: floatSlow 5.5s ease-in-out infinite;
+    }
+
+    .marker-pin-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .marker-pulse {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-radius: 9999px;
+      animation: pulseRing 2.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+      pointer-events: none;
+    }
+
+    .marker-core {
+      position: relative;
+      z-index: 2;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .marker-pin-wrapper:hover .marker-core,
+    .marker-pin-wrapper.is-active .marker-core {
+      transform: scale(1.15) translateY(-3px);
+    }
+
+    /* Custom Leaflet Popup Styling */
+    .leaflet-popup-content-wrapper {
+      border-radius: 16px !important;
+      padding: 0 !important;
+      overflow: hidden;
+      box-shadow: 0 20px 40px -12px rgba(22, 25, 37, 0.24) !important;
+      border: 1px solid rgba(22, 25, 37, 0.08);
+    }
+    .leaflet-popup-content {
+      margin: 0 !important;
+      width: 260px !important;
+      font-family: 'Inter', sans-serif !important;
+    }
+    .leaflet-popup-tip {
+      box-shadow: 0 6px 14px rgba(22, 25, 37, 0.14) !important;
+    }
+    .leaflet-container {
+      font-family: 'Inter', sans-serif !important;
+      z-index: 10;
+    }
+
+    /* Highlight ring animation when jumping from Map -> Menu Card */
+    @keyframes cardHighlight {
+      0% { box-shadow: 0 0 0 0 rgba(255, 82, 27, 0.65); }
+      50% { box-shadow: 0 0 0 6px rgba(255, 82, 27, 0.25); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 82, 27, 0); }
+    }
+    .card-highlight-flash {
+      animation: cardHighlight 1.6s ease-out 2;
+      border-color: #FF521B !important;
+    }
+
+    /* Clean scrollbar for truck side panel & mobile horizontal menu slider */
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(22, 25, 37, 0.16);
+      border-radius: 9999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(22, 25, 37, 0.3);
+    }
+
+    /* Subtle dot grid backdrop for hero */
+    .hero-dot-pattern {
+      background-image: radial-gradient(rgba(22, 25, 37, 0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+  </style>
+</head>
+<body class="font-sans text-charcoal antialiased selection:bg-flame selection:text-white">
+
+  <!-- ===================================================================== -->
+  <!-- 1. STICKY NAVIGATION BAR                                              -->
+  <!-- ===================================================================== -->
+  <header id="navbar" class="sticky top-0 z-40 w-full bg-cream/90 backdrop-blur-md border-b border-charcoal/5 transition-shadow duration-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-18 py-3">
+        <!-- Brand Logo Lockup -->
+        <a href="#top" class="flex items-center gap-2.5 group focus:outline-none" aria-label="Truck Spot Home">
+          <!-- Custom Scalable Truck Spot SVG Logo Mark (Pin + Food Truck + Motion Speed Lines) -->
+          <svg width="42" height="42" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" class="shrink-0 transition-transform duration-200 group-hover:scale-105" aria-hidden="true">
+            <!-- Motion Speed Lines -->
+            <rect x="3" y="18" width="11" height="4" rx="2" fill="#FFB703" />
+            <rect x="1" y="26" width="14" height="4" rx="2" fill="#FF521B" />
+            <rect x="6" y="34" width="9" height="4" rx="2" fill="#FFB703" />
+            <!-- Location Pin Body -->
+            <path d="M38 6C25.297 6 15 16.074 15 28.5C15 43.1 34.4 58.1 36.7 59.8C37.47 60.38 38.53 60.38 39.3 59.8C41.6 58.1 61 43.1 61 28.5C61 16.074 50.703 6 38 6Z" fill="#FF521B" />
+            <!-- Pin Inner Contrast Disc -->
+            <circle cx="38" cy="27.5" r="16.5" fill="#161925" />
+            <!-- Minimalist Food Truck Silhouette -->
+            <!-- Main Box & Cab -->
+            <path d="M25.5 22.5C25.5 21.12 26.62 20 28 20H41.5C42.6 20 43.5 20.9 43.5 22V24H46.8C47.74 24 48.6 24.53 49.02 25.37L50.7 28.74C50.9 29.13 51 29.56 51 30V33C51 34.1 50.1 35 49 35H27.5C26.4 35 25.5 34.1 25.5 33V22.5Z" fill="#FFFFFF" />
+            <!-- Serving Awning Accent -->
+            <path d="M28 22.5H40.5L41.5 25.5H27L28 22.5Z" fill="#FFB703" />
+            <!-- Serving Window -->
+            <rect x="28.5" y="26.8" width="10.5" height="4" rx="1" fill="#161925" />
+            <!-- Cab Windshield -->
+            <path d="M44.5 25.8H47.2L48.6 28.8H44.5V25.8Z" fill="#161925" />
+            <!-- Wheels -->
+            <circle cx="31.5" cy="35.2" r="3.4" fill="#FF521B" stroke="#FFFFFF" stroke-width="1.6" />
+            <circle cx="45.2" cy="35.2" r="3.4" fill="#FF521B" stroke="#FFFFFF" stroke-width="1.6" />
+          </svg>
+          <div class="flex flex-col leading-none">
+            <span class="font-display font-extrabold text-xl tracking-tight text-charcoal">
+              Truck<span class="text-flame">Spot</span>
+            </span>
+            <span class="text-[10px] font-semibold uppercase tracking-widest text-charcoal/50 mt-0.5">Live Street Food</span>
+          </div>
+        </a>
+
+        <!-- Desktop Navigation Links -->
+        <nav class="hidden md:flex items-center gap-7" aria-label="Primary Navigation">
+          <a href="#map-section" class="text-sm font-semibold text-charcoal/80 hover:text-flame transition-colors">Live Map</a>
+          <a href="#menus-section" class="text-sm font-semibold text-charcoal/80 hover:text-flame transition-colors">Menus &amp; Hours</a>
+          <a href="#alerts-section" class="text-sm font-semibold text-charcoal/80 hover:text-flame transition-colors">Get Alerts</a>
+          <button type="button" onclick="openBrandModal()" class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-charcoal/5 text-charcoal/75 hover:bg-charcoal/10 hover:text-charcoal transition-colors">
+            <svg class="w-3.5 h-3.5 text-flame" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            Brand Assets (SVG)
+          </button>
+        </nav>
+
+        <!-- Desktop CTA & Mobile Menu Toggle -->
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="handleAppDownloadClick('Get the App')" class="hidden sm:inline-flex items-center gap-2 bg-flame hover:bg-flame-dark text-white text-sm font-bold px-5 py-2.5 rounded-full shadow-glow transition-all active:scale-95">
+            <span>Get the App</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+          </button>
+
+          <!-- Mobile Hamburger Button -->
+          <button id="mobile-menu-btn" type="button" aria-label="Toggle Navigation Menu" aria-expanded="false" class="md:hidden inline-flex items-center justify-center p-2.5 rounded-xl bg-white border border-charcoal/10 text-charcoal hover:bg-flame/10 hover:text-flame transition-colors">
+            <svg id="hamburger-icon" class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            <svg id="close-icon" class="w-6 h-6 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Dropdown Navigation -->
+    <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-charcoal/10 px-4 pt-3 pb-5 shadow-lg">
+      <div class="flex flex-col space-y-2">
+        <a href="#map-section" class="mobile-nav-link px-4 py-3 rounded-xl text-base font-semibold text-charcoal hover:bg-cream hover:text-flame transition-colors">Live Map</a>
+        <a href="#menus-section" class="mobile-nav-link px-4 py-3 rounded-xl text-base font-semibold text-charcoal hover:bg-cream hover:text-flame transition-colors">Menus &amp; Hours</a>
+        <a href="#alerts-section" class="mobile-nav-link px-4 py-3 rounded-xl text-base font-semibold text-charcoal hover:bg-cream hover:text-flame transition-colors">Get Alerts</a>
+        <button type="button" onclick="closeMobileMenu(); openBrandModal();" class="text-left px-4 py-3 rounded-xl text-base font-semibold text-charcoal/80 hover:bg-cream hover:text-flame transition-colors flex items-center gap-2">
+          <span>Brand Assets (SVG)</span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-amberwarm/20 text-charcoal font-bold">Client Pack</span>
+        </button>
+        <div class="pt-2">
+          <button type="button" onclick="closeMobileMenu(); handleAppDownloadClick('Mobile App');" class="w-full flex items-center justify-center gap-2 bg-flame hover:bg-flame-dark text-white font-bold px-5 py-3.5 rounded-xl shadow-glow">
+            <span>Get the App — Join Waitlist</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- =================================================================== -->
+    <!-- 2. HERO SECTION                                                     -->
+    <!-- =================================================================== -->
+    <section class="relative overflow-hidden hero-dot-pattern pt-10 pb-16 sm:pt-16 sm:pb-24 lg:pt-20 lg:pb-28">
+      <!-- Soft Ambient Glows -->
+      <div class="pointer-events-none absolute -top-24 -right-24 w-96 h-96 rounded-full bg-amberwarm/20 blur-3xl"></div>
+      <div class="pointer-events-none absolute top-40 -left-24 w-80 h-80 rounded-full bg-flame/15 blur-3xl"></div>
+
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10 items-center">
+          <!-- Left Column: Copy & Store CTAs -->
+          <div class="lg:col-span-6 text-center lg:text-left">
+            <!-- Live Status Badge -->
+            <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-charcoal/10 shadow-soft mb-6">
+              <span class="relative flex h-2.5 w-2.5">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-fresh opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-fresh"></span>
+              </span>
+              <span class="text-xs sm:text-sm font-bold tracking-wide text-charcoal">Live in 12+ Neighborhoods</span>
+            </div>
+
+            <!-- Main Headline -->
+            <h1 class="font-display font-extrabold text-4xl sm:text-5xl lg:text-[3.5rem] leading-[1.08] tracking-tight text-charcoal mb-6">
+              Track Street Food <br class="hidden sm:inline" />
+              in <span class="text-transparent bg-clip-text bg-gradient-to-r from-flame to-amberwarm">Real Time.</span>
+            </h1>
+
+            <!-- Subheadline -->
+            <p class="text-base sm:text-lg text-charcoal/75 leading-relaxed max-w-xl mx-auto lg:mx-0 mb-8">
+              Never chase an empty parking lot again. Instantly spot nearby food trucks on a live GPS map, browse up-to-the-minute menus, and check real operating hours before you walk out the door.
+            </p>
+
+            <!-- App Store & Google Play Buttons -->
+            <div class="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3.5 mb-8">
+              <!-- Apple App Store -->
+              <button type="button" onclick="handleAppDownloadClick('App Store (iOS)')" class="w-full sm:w-auto flex items-center justify-center sm:justify-start gap-3.5 bg-charcoal hover:bg-charcoal-light text-white px-6 py-3.5 rounded-2xl shadow-card transition-all hover:-translate-y-0.5 active:scale-95">
+                <svg class="w-7 h-7 fill-current shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.09-.52 2.72-1.3z"/>
+                </svg>
+                <div class="text-left leading-tight">
+                  <div class="text-[10px] uppercase tracking-wider text-white/70 font-medium">Pre-order on the</div>
+                  <div class="text-base font-bold">App Store</div>
+                </div>
+              </button>
+
+              <!-- Google Play -->
+              <button type="button" onclick="handleAppDownloadClick('Google Play (Android)')" class="w-full sm:w-auto flex items-center justify-center sm:justify-start gap-3.5 bg-white hover:bg-cream text-charcoal border-2 border-charcoal/15 px-6 py-3.5 rounded-2xl shadow-soft transition-all hover:-translate-y-0.5 active:scale-95">
+                <svg class="w-7 h-7 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="#10B981" d="M3.609 1.814L13.792 12 3.61 22.186a1.99 1.99 0 01-.61-1.436V3.25c0-.56.23-1.067.609-1.436z"/>
+                  <path fill="#FFB703" d="M17.207 8.585L13.792 12l3.415 3.415 3.857-2.204c.78-.446.78-1.576 0-2.022l-3.857-2.604z"/>
+                  <path fill="#FF521B" d="M13.792 12L3.61 22.186c.42.408 1.048.555 1.638.218l11.959-6.989L13.792 12z"/>
+                  <path fill="#161925" d="M13.792 12l3.415-3.415L5.248 1.596c-.59-.337-1.218-.19-1.638.218L13.792 12z"/>
+                </svg>
+                <div class="text-left leading-tight">
+                  <div class="text-[10px] uppercase tracking-wider text-charcoal/60 font-medium">Early Access on</div>
+                  <div class="text-base font-bold">Google Play</div>
+                </div>
+              </button>
+            </div>
+
+            <!-- Social Proof Strip -->
+            <div class="flex flex-wrap items-center justify-center lg:justify-start gap-x-6 gap-y-2 text-xs sm:text-sm font-medium text-charcoal/65">
+              <div class="flex items-center gap-1.5">
+                <span class="text-amberwarm text-base">★★★★★</span>
+                <span class="font-bold text-charcoal">4.9</span> Beta Rating
+              </div>
+              <span class="hidden sm:inline text-charcoal/20">•</span>
+              <div><span class="font-bold text-charcoal">42+</span> Verified Trucks</div>
+              <span class="hidden sm:inline text-charcoal/20">•</span>
+              <div><span class="font-bold text-charcoal">GPS</span> Updated Every 60s</div>
+            </div>
+          </div>
+
+          <!-- Right Column: Sleek Floating Mobile App Mockup -->
+          <div class="lg:col-span-6 flex justify-center relative">
+            <!-- Floating Notification Pill (Top Left) -->
+            <div class="hidden sm:flex items-center gap-3 absolute -left-2 xl:left-4 top-12 z-20 bg-white/95 backdrop-blur-md px-4 py-3 rounded-2xl shadow-card border border-charcoal/5 animate-float">
+              <div class="w-10 h-10 rounded-xl bg-flame/15 flex items-center justify-center text-xl">🌮</div>
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-xs font-extrabold text-charcoal">El Fuego Tacos</span>
+                  <span class="w-2 h-2 rounded-full bg-fresh"></span>
+                </div>
+                <p class="text-[11px] text-charcoal/65 font-medium">Just parked 0.2 mi away • Open</p>
+              </div>
+            </div>
+
+            <!-- Floating Rating Pill (Bottom Right) -->
+            <div class="hidden sm:flex items-center gap-2.5 absolute -right-2 xl:right-2 bottom-16 z-20 bg-charcoal text-white px-4 py-3 rounded-2xl shadow-card border border-white/10">
+              <div class="w-9 h-9 rounded-full bg-amberwarm/20 flex items-center justify-center text-amberwarm font-extrabold text-sm">🔥</div>
+              <div>
+                <p class="text-xs font-bold">Hot Deal Nearby</p>
+                <p class="text-[11px] text-white/70">2x Birria Tacos + Agua Fresca</p>
+              </div>
+            </div>
+
+            <!-- Phone Device Frame -->
+            <div class="relative w-[300px] sm:w-[330px] rounded-[2.75rem] bg-charcoal p-3 shadow-2xl border-4 border-charcoal-light">
+              <!-- Speaker Notch -->
+              <div class="absolute top-3 left-1/2 -translate-x-1/2 w-28 h-6 bg-charcoal rounded-b-2xl z-20 flex items-center justify-center">
+                <div class="w-12 h-1.5 rounded-full bg-white/15"></div>
+              </div>
+
+              <!-- Phone Screen -->
+              <div class="relative bg-cream rounded-[2.1rem] overflow-hidden h-[560px] flex flex-col">
+                <!-- App Status Header -->
+                <div class="pt-9 pb-3 px-4 bg-white/95 backdrop-blur-sm border-b border-charcoal/5 flex items-center justify-between z-10">
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-charcoal/45">Current District</p>
+                    <p class="text-sm font-extrabold text-charcoal flex items-center gap-1">
+                      <span class="text-flame">●</span> Downtown Austin
+                    </p>
+                  </div>
+                  <span class="px-2.5 py-1 rounded-full bg-fresh/15 text-fresh text-[11px] font-bold">5 Open Now</span>
+                </div>
+
+                <!-- Stylized Live Mini-Map Canvas Inside Phone -->
+                <div class="relative flex-1 bg-[#EAECEF] overflow-hidden">
+                  <!-- Crisp Vector Street Grid Backdrop -->
+                  <svg class="absolute inset-0 w-full h-full" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="320" height="320" fill="#F3F4F6"/>
+                    <!-- Park & River Accents -->
+                    <path d="M-10 235 C75 215, 165 270, 330 230 L330 275 C175 305, 85 255, -10 275 Z" fill="#CBE7F8"/>
+                    <rect x="18" y="30" width="76" height="62" rx="14" fill="#DCFCE7"/>
+                    <rect x="225" y="135" width="70" height="58" rx="12" fill="#DCFCE7"/>
+                    <!-- Road Grid -->
+                    <g stroke="#FFFFFF" stroke-width="8" stroke-linecap="round">
+                      <line x1="0" y1="108" x2="320" y2="96"/>
+                      <line x1="0" y1="186" x2="320" y2="178"/>
+                      <line x1="115" y1="0" x2="108" y2="320"/>
+                      <line x1="205" y1="0" x2="215" y2="320"/>
+                    </g>
+                    <g stroke="#E5E7EB" stroke-width="2">
+                      <line x1="0" y1="55" x2="320" y2="55"/>
+                      <line x1="0" y1="145" x2="320" y2="145"/>
+                      <line x1="58" y1="0" x2="58" y2="320"/>
+                      <line x1="265" y1="0" x2="265" y2="320"/>
+                    </g>
+                    <!-- Active Route Line -->
+                    <path d="M156 184 L112 184 L114 104 L198 100" fill="none" stroke="#FF521B" stroke-width="3.5" stroke-dasharray="6 5" stroke-linecap="round"/>
+                  </svg>
+
+                  <!-- User Blue Dot -->
+                  <div class="absolute left-[46%] top-[55%] -translate-x-1/2 -translate-y-1/2">
+                    <span class="absolute -inset-3 rounded-full bg-blue-500/20 animate-ping"></span>
+                    <span class="relative block w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow-md"></span>
+                  </div>
+
+                  <!-- Animated Food Truck Pins inside Mockup -->
+                  <button type="button" onclick="focusTruckFromHero('el-fuego')" class="absolute left-[62%] top-[28%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer focus:outline-none" title="View El Fuego Tacos on Live Map">
+                    <span class="absolute -inset-2 rounded-full bg-flame/35 animate-ping"></span>
+                    <span class="relative flex items-center justify-center w-9 h-9 rounded-full bg-flame text-white shadow-lg border-2 border-white text-base group-hover:scale-110 transition-transform">🌮</span>
+                  </button>
+
+                  <button type="button" onclick="focusTruckFromHero('smash-roll')" class="absolute left-[28%] top-[36%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer focus:outline-none" title="View Smash & Roll on Live Map">
+                    <span class="relative flex items-center justify-center w-8 h-8 rounded-full bg-charcoal text-white shadow-md border-2 border-white text-sm group-hover:scale-110 transition-transform">🍔</span>
+                  </button>
+
+                  <button type="button" onclick="focusTruckFromHero('bao-street')" class="absolute left-[75%] top-[62%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer focus:outline-none" title="View Bao Street Kitchen on Live Map">
+                    <span class="relative flex items-center justify-center w-8 h-8 rounded-full bg-amberwarm text-charcoal shadow-md border-2 border-white text-sm group-hover:scale-110 transition-transform">🥟</span>
+                  </button>
+                </div>
+
+                <!-- Bottom Live Drawer Card Inside Phone -->
+                <div class="bg-white p-4 rounded-t-3xl -mt-5 relative z-10 shadow-[0_-8px_24px_rgba(22,25,37,0.08)]">
+                  <div class="w-10 h-1 rounded-full bg-charcoal/15 mx-auto mb-3"></div>
+                  <div class="flex items-start justify-between mb-2">
+                    <div>
+                      <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-fresh bg-fresh/10 px-2 py-0.5 rounded-full mb-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-fresh"></span> Open Now
+                      </span>
+                      <h3 class="font-display font-extrabold text-base text-charcoal">El Fuego Tacos</h3>
+                      <p class="text-[11px] text-charcoal/60">South Congress Lot • 0.2 mi</p>
+                    </div>
+                    <div class="text-right">
+                      <span class="inline-block text-xs font-extrabold text-charcoal bg-amberwarm/25 px-2 py-0.5 rounded-lg">★ 4.9</span>
+                      <p class="text-[10px] text-charcoal/55 mt-1">Until 10 PM</p>
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-between text-xs bg-cream rounded-xl px-3 py-2 mb-3 border border-charcoal/5">
+                    <span class="font-semibold text-charcoal">Birria Quesatacos (3)</span>
+                    <span class="font-extrabold text-flame">$11.50</span>
+                  </div>
+                  <a href="#map-section" class="block w-full text-center bg-flame hover:bg-flame-dark text-white text-xs font-bold py-2.5 rounded-xl transition-colors">
+                    Explore Live Map Below ↓
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 3. INTERACTIVE FOOD TRUCK MAP SECTION (#map-section)                -->
+    <!-- =================================================================== -->
+    <section id="map-section" class="py-16 sm:py-24 bg-white border-y border-charcoal/5">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <!-- Section Header -->
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div>
+            <span class="inline-block text-xs font-extrabold uppercase tracking-widest text-flame mb-2">Interactive Live Radar</span>
+            <h2 class="font-display font-extrabold text-3xl sm:text-4xl text-charcoal tracking-tight">
+              Who's Serving Near You Right Now
+            </h2>
+          </div>
+          <p class="text-sm sm:text-base text-charcoal/65 max-w-md">
+            Filter by craving, toggle open trucks, or click any pin on the Austin street-food map to inspect hours and jump straight to their menu.
+          </p>
+        </div>
+
+        <!-- Interactive Filter Bar -->
+        <div class="bg-cream border border-charcoal/10 rounded-2xl p-4 mb-6 shadow-soft">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <!-- Cuisine Filter Pills -->
+            <div id="cuisine-filter-pills" class="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 custom-scroll" role="tablist" aria-label="Filter trucks by cuisine">
+              <!-- Populated via JS to stay synced with menu cards -->
+            </div>
+
+            <!-- Right Controls: Open Now Switch + Search -->
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+              <!-- Open Now Toggle -->
+              <label class="inline-flex items-center justify-between sm:justify-start gap-2.5 bg-white border border-charcoal/10 px-3.5 py-2 rounded-xl cursor-pointer select-none hover:border-fresh/50 transition-colors">
+                <span class="flex items-center gap-1.5 text-xs font-bold text-charcoal">
+                  <span class="w-2 h-2 rounded-full bg-fresh"></span>
+                  Open Now
+                </span>
+                <input id="open-now-toggle" type="checkbox" class="sr-only peer" />
+                <div class="relative w-10 h-5.5 bg-charcoal/15 rounded-full peer peer-checked:bg-fresh transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:after:translate-x-4.5 shadow-inner" style="height: 22px;">
+                  <span id="open-toggle-knob" class="block w-4 h-4 bg-white rounded-full shadow transform translate-x-0.5 translate-y-[3px] transition-transform duration-200"></span>
+                </div>
+              </label>
+
+              <!-- Quick Search Input -->
+              <div class="relative flex-1 sm:w-56">
+                <svg class="w-4 h-4 text-charcoal/40 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/>
+                </svg>
+                <input id="truck-search-input" type="search" placeholder="Search truck or dish..." class="w-full pl-9 pr-3 py-2 text-sm bg-white border border-charcoal/10 rounded-xl text-charcoal placeholder:text-charcoal/40 focus:outline-none focus:ring-2 focus:ring-flame/30 focus:border-flame transition-all" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map + Side List Split Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+          <!-- Side List Panel -->
+          <div class="lg:col-span-4 order-2 lg:order-1 bg-cream rounded-3xl border border-charcoal/10 p-4 flex flex-col max-h-[500px] lg:h-[540px]">
+            <div class="flex items-center justify-between px-1 pb-3 border-b border-charcoal/10 mb-3">
+              <span class="text-xs font-extrabold uppercase tracking-wider text-charcoal/60">
+                Showing <span id="map-results-count" class="text-flame">6</span> Food Trucks
+              </span>
+              <button type="button" onclick="resetAllFilters()" class="text-xs font-bold text-flame hover:underline">Reset</button>
+            </div>
+
+            <!-- Scrollable Matching Truck List -->
+            <div id="map-truck-list" class="flex-1 overflow-y-auto space-y-2.5 pr-1 custom-scroll">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </div>
+
+          <!-- Interactive Leaflet Map Container -->
+          <div class="lg:col-span-8 order-1 lg:order-2 relative rounded-3xl overflow-hidden border border-charcoal/10 shadow-card h-[400px] sm:h-[460px] lg:h-[540px] bg-slate-100">
+            <div id="leaflet-map" class="w-full h-full"></div>
+
+            <!-- Subtle Map Legend Overlay -->
+            <div class="absolute bottom-4 left-4 z-[400] bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-md border border-charcoal/10 flex items-center gap-3 text-[11px] font-bold text-charcoal">
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-fresh"></span> Open</span>
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amberwarm"></span> Closing Soon</span>
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-charcoal/40"></span> Later</span>
+            </div>
+
+            <!-- Recenter Map Button -->
+            <button type="button" onclick="recenterMap()" title="Recenter on District" class="absolute top-4 right-4 z-[400] bg-white/95 hover:bg-white text-charcoal p-2.5 rounded-xl shadow-md border border-charcoal/10 transition-all active:scale-95">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="hidden"/>
+                <circle cx="12" cy="12" r="3" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v3m0 14v3M2 12h3m14 0h3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 4. TRUCK MENUS & OPERATING HOURS SECTION (#menus-section)           -->
+    <!-- =================================================================== -->
+    <section id="menus-section" class="py-16 sm:py-24 bg-cream">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <!-- Section Heading -->
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div>
+            <span class="inline-block text-xs font-extrabold uppercase tracking-widest text-flame mb-2">Menus &amp; Hours</span>
+            <h2 class="font-display font-extrabold text-3xl sm:text-4xl text-charcoal tracking-tight">
+              Browse Signature Dishes Before You Go
+            </h2>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-semibold text-charcoal/60">
+            <span class="md:hidden inline-flex items-center gap-1 bg-white px-3 py-1.5 rounded-full border border-charcoal/10">
+              Swipe cards horizontally →
+            </span>
+            <span id="menu-filter-badge" class="hidden bg-flame/10 text-flame px-3 py-1.5 rounded-full font-bold">
+              Filtered
+            </span>
+          </div>
+        </div>
+
+        <!-- Synced Category Filter Pills (Convenience bar for Menus section) -->
+        <div id="menu-category-sync-pills" class="flex items-center gap-2 overflow-x-auto pb-4 mb-4 custom-scroll">
+          <!-- Populated & synced via JS -->
+        </div>
+
+        <!-- Responsive Card Grid (Horizontal Snap Carousel on Mobile, 2-col Tablet, 3-col Desktop) -->
+        <div id="menus-card-grid" class="flex md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-x-auto md:overflow-visible snap-x snap-mandatory pb-4 md:pb-0 custom-scroll">
+          <!-- 6 Food Truck Menu Cards dynamically rendered via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 5. EMAIL & PUSH-NOTIFICATION OPT-IN SECTION (#alerts-section)       -->
+    <!-- =================================================================== -->
+    <section id="alerts-section" class="py-16 sm:py-24 bg-white">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="relative rounded-[2rem] bg-charcoal text-white overflow-hidden shadow-2xl p-6 sm:p-10 lg:p-14">
+          <!-- Decorative Gradients -->
+          <div class="pointer-events-none absolute -top-24 -right-20 w-80 h-80 rounded-full bg-flame/30 blur-3xl"></div>
+          <div class="pointer-events-none absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-amberwarm/20 blur-3xl"></div>
+
+          <div class="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+            <!-- Left Value Copy -->
+            <div class="lg:col-span-5">
+              <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/10 text-amberwarm text-xs font-extrabold uppercase tracking-wider mb-5">
+                🔔 Early Access + Live Alerts
+              </span>
+              <h2 class="font-display font-extrabold text-3xl sm:text-4xl leading-tight mb-4">
+                Get Pinged When Your Favorite Truck Parks Nearby.
+              </h2>
+              <p class="text-white/75 text-sm sm:text-base leading-relaxed mb-6">
+                Join our pre-launch foodie list to receive instant pop-up location drops, secret menu promos, and a <span class="text-amberwarm font-bold">$5 launch-day credit</span> before Truck Spot hits the App Store &amp; Google Play.
+              </p>
+
+              <!-- Perks Bullets -->
+              <ul class="space-y-3 text-sm text-white/85">
+                <li class="flex items-center gap-2.5">
+                  <span class="w-5 h-5 rounded-full bg-fresh/20 text-fresh flex items-center justify-center text-xs font-bold">✓</span>
+                  Real-time alerts when trucks open within 1 mile
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <span class="w-5 h-5 rounded-full bg-fresh/20 text-fresh flex items-center justify-center text-xs font-bold">✓</span>
+                  Zero spam — only the cuisines you actually crave
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <span class="w-5 h-5 rounded-full bg-fresh/20 text-fresh flex items-center justify-center text-xs font-bold">✓</span>
+                  First invite to iOS &amp; Android launch
+                </li>
+              </ul>
+            </div>
+
+            <!-- Right Interactive Opt-In Form / Confirmation -->
+            <div class="lg:col-span-7">
+              <div class="bg-charcoal-light/85 backdrop-blur-md border border-white/10 rounded-3xl p-6 sm:p-8">
+                <!-- Active Form State -->
+                <form id="alerts-optin-form" novalidate class="space-y-5">
+                  <!-- Email Field -->
+                  <div>
+                    <label for="optin-email" class="block text-xs font-bold uppercase tracking-wider text-white/75 mb-2">
+                      Email Address <span class="text-flame">*</span>
+                    </label>
+                    <input id="optin-email" type="email" required placeholder="hungry@example.com" class="w-full px-4 py-3.5 rounded-xl bg-charcoal border border-white/15 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-flame focus:border-flame transition-all text-sm sm:text-base" />
+                    <p id="email-error-msg" class="hidden text-xs text-amberwarm font-semibold mt-1.5">
+                      Please enter a valid email address so we can send your truck alerts.
+                    </p>
+                  </div>
+
+                  <!-- Favorite Cuisine Checkboxes -->
+                  <div>
+                    <span class="block text-xs font-bold uppercase tracking-wider text-white/75 mb-2.5">
+                      Pick Your Cravings
+                    </span>
+                    <div class="flex flex-wrap gap-2">
+                      <label class="cursor-pointer">
+                        <input type="checkbox" name="cuisine" value="Tacos" checked class="sr-only peer" />
+                        <span class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-charcoal border border-white/15 text-white/75 peer-checked:bg-flame peer-checked:border-flame peer-checked:text-white transition-all">
+                          🌮 Tacos
+                        </span>
+                      </label>
+                      <label class="cursor-pointer">
+                        <input type="checkbox" name="cuisine" value="Burgers" checked class="sr-only peer" />
+                        <span class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-charcoal border border-white/15 text-white/75 peer-checked:bg-flame peer-checked:border-flame peer-checked:text-white transition-all">
+                          🍔 Burgers
+                        </span>
+                      </label>
+                      <label class="cursor-pointer">
+                        <input type="checkbox" name="cuisine" value="BBQ" class="sr-only peer" />
+                        <span class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-charcoal border border-white/15 text-white/75 peer-checked:bg-flame peer-checked:border-flame peer-checked:text-white transition-all">
+                          🔥 BBQ
+                        </span>
+                      </label>
+                      <label class="cursor-pointer">
+                        <input type="checkbox" name="cuisine" value="Asian Fusion" class="sr-only peer" />
+                        <span class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-charcoal border border-white/15 text-white/75 peer-checked:bg-flame peer-checked:border-flame peer-checked:text-white transition-all">
+                          🥟 Asian Fusion
+                        </span>
+                      </label>
+                      <label class="cursor-pointer">
+                        <input type="checkbox" name="cuisine" value="Desserts" class="sr-only peer" />
+                        <span class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-charcoal border border-white/15 text-white/75 peer-checked:bg-flame peer-checked:border-flame peer-checked:text-white transition-all">
+                          🧇 Desserts
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- Push Notification Opt-In Toggle -->
+                  <div class="flex items-center justify-between gap-4 p-4 rounded-2xl bg-charcoal/80 border border-white/10">
+                    <div class="flex items-start gap-3">
+                      <div id="push-icon-badge" class="w-9 h-9 rounded-xl bg-white/10 text-white/70 flex items-center justify-center shrink-0 transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <p class="text-sm font-bold text-white">Enable Live Browser Push Alerts</p>
+                        <p id="push-status-text" class="text-xs text-white/60 mt-0.5">Instant ping when a nearby truck goes live.</p>
+                      </div>
+                    </div>
+                    <button id="push-toggle-btn" type="button" role="switch" aria-checked="false" aria-label="Enable Live Push Notifications" class="relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-white/20 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-fresh">
+                      <span id="push-toggle-knob" class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow transition duration-200 translate-x-0"></span>
+                    </button>
+                  </div>
+
+                  <!-- Submit CTA -->
+                  <button type="submit" class="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-flame to-[#FF6B2B] hover:from-flame-dark hover:to-flame text-white font-display font-extrabold text-base shadow-glow transition-all active:scale-[0.99] flex items-center justify-center gap-2">
+                    <span>Notify Me &amp; Claim $5 Launch Credit</span>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                  </button>
+                </form>
+
+                <!-- Celebratory Confirmation State (Hidden Initially) -->
+                <div id="alerts-success-state" class="hidden text-center py-6 space-y-4">
+                  <div class="w-16 h-16 rounded-full bg-fresh/20 border-2 border-fresh text-fresh flex items-center justify-center mx-auto text-3xl">
+                    ✓
+                  </div>
+                  <h3 class="font-display font-extrabold text-2xl text-white">You're on the Truck Spot VIP List!</h3>
+                  <p id="alerts-success-summary" class="text-sm text-white/80 max-w-md mx-auto leading-relaxed"></p>
+                  <div class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amberwarm/15 border border-amberwarm/30 text-amberwarm text-xs font-bold">
+                    🎟️ Launch Code Reserved: STREETFOOD5
+                  </div>
+                  <div class="pt-2">
+                    <button type="button" onclick="resetOptInForm()" class="text-xs font-semibold text-white/60 hover:text-white underline">
+                      Update alert preferences
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- 6. CLEAN FOOTER                                                       -->
+  <!-- ===================================================================== -->
+  <footer class="bg-charcoal text-white border-t border-white/10 pt-14 pb-10">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-8 pb-10 border-b border-white/10">
+        <!-- Monochrome Light Logo Lockup -->
+        <div>
+          <a href="#top" class="inline-flex items-center gap-2.5 mb-3">
+            <svg width="36" height="36" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="3" y="18" width="11" height="4" rx="2" fill="#FFFFFF" opacity="0.65" />
+              <rect x="1" y="26" width="14" height="4" rx="2" fill="#FFFFFF" />
+              <rect x="6" y="34" width="9" height="4" rx="2" fill="#FFFFFF" opacity="0.65" />
+              <path d="M38 6C25.297 6 15 16.074 15 28.5C15 43.1 34.4 58.1 36.7 59.8C37.47 60.38 38.53 60.38 39.3 59.8C41.6 58.1 61 43.1 61 28.5C61 16.074 50.703 6 38 6Z" fill="#FFFFFF" />
+              <circle cx="38" cy="27.5" r="16.5" fill="#161925" />
+              <path d="M25.5 22.5C25.5 21.12 26.62 20 28 20H41.5C42.6 20 43.5 20.9 43.5 22V24H46.8C47.74 24 48.6 24.53 49.02 25.37L50.7 28.74C50.9 29.13 51 29.56 51 30V33C51 34.1 50.1 35 49 35H27.5C26.4 35 25.5 34.1 25.5 33V22.5Z" fill="#FFFFFF" />
+              <rect x="28.5" y="26.8" width="10.5" height="4" rx="1" fill="#161925" />
+              <path d="M44.5 25.8H47.2L48.6 28.8H44.5V25.8Z" fill="#161925" />
+              <circle cx="31.5" cy="35.2" r="3.4" fill="#161925" stroke="#FFFFFF" stroke-width="1.6" />
+              <circle cx="45.2" cy="35.2" r="3.4" fill="#161925" stroke="#FFFFFF" stroke-width="1.6" />
+            </svg>
+            <span class="font-display font-extrabold text-xl tracking-tight text-white">TruckSpot</span>
+          </a>
+          <p class="text-xs sm:text-sm text-white/55 max-w-xs">
+            Real-time GPS discovery for street-food lovers and independent food trucks.
+          </p>
+        </div>
+
+        <!-- Footer Navigation & Brand Pack Trigger -->
+        <div class="flex flex-wrap items-center gap-x-7 gap-y-3 text-sm font-medium text-white/75">
+          <a href="#map-section" class="hover:text-white transition-colors">Live Map</a>
+          <a href="#menus-section" class="hover:text-white transition-colors">Menus &amp; Hours</a>
+          <a href="#alerts-section" class="hover:text-white transition-colors">Get Alerts</a>
+          <button type="button" onclick="openBrandModal()" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-flame text-white text-xs font-bold transition-colors border border-white/10">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Preview Logo Pack (SVG)
+          </button>
+        </div>
+      </div>
+
+      <!-- Bottom Copyright & Socials -->
+      <div class="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/45">
+        <p>© 2026 Truck Spot Inc. All rights reserved. Built with clean HTML, Tailwind CSS &amp; Leaflet.</p>
+        <div class="flex items-center gap-4">
+          <a href="#alerts-section" aria-label="Instagram" class="p-2 rounded-lg bg-white/5 hover:bg-white/15 hover:text-white transition-colors">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+          </a>
+          <a href="#alerts-section" aria-label="X Twitter" class="p-2 rounded-lg bg-white/5 hover:bg-white/15 hover:text-white transition-colors">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          </a>
+          <a href="#alerts-section" aria-label="TikTok" class="p-2 rounded-lg bg-white/5 hover:bg-white/15 hover:text-white transition-colors">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ===================================================================== -->
+  <!-- MODAL 1: FULL TRUCK MENU & WEEKLY OPERATING HOURS                     -->
+  <!-- ===================================================================== -->
+  <div id="full-menu-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-charcoal/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="menu-modal-title">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[88vh] overflow-hidden shadow-2xl flex flex-col animate-[fadeIn_0.2s_ease-out]">
+      <!-- Modal Header (Color-coded by truck) -->
+      <div id="menu-modal-header" class="p-6 text-white relative">
+        <button type="button" onclick="closeMenuModal()" aria-label="Close Menu Modal" class="absolute top-5 right-5 w-9 h-9 rounded-full bg-black/20 hover:bg-black/35 text-white flex items-center justify-center transition-colors">
+          ✕
+        </button>
+        <div id="menu-modal-header-content"></div>
+      </div>
+
+      <!-- Modal Scroll Body -->
+      <div id="menu-modal-body" class="p-6 overflow-y-auto space-y-6 custom-scroll">
+        <!-- Populated via JS -->
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-4 sm:px-6 bg-cream border-t border-charcoal/10 flex flex-wrap items-center justify-between gap-3">
+        <button id="menu-modal-map-btn" type="button" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-flame hover:bg-flame-dark text-white text-sm font-bold transition-colors">
+          📍 Show on Live Map
+        </button>
+        <button type="button" onclick="closeMenuModal()" class="px-5 py-2.5 rounded-xl bg-charcoal/5 hover:bg-charcoal/10 text-charcoal text-sm font-bold transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODAL 2: BRAND ASSETS & LOGO PACK PREVIEW (CLIENT REVIEW)             -->
+  <!-- ===================================================================== -->
+  <div id="brand-assets-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-charcoal/75 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="brand-modal-title">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+      <!-- Header -->
+      <div class="px-6 py-5 bg-charcoal text-white flex items-center justify-between">
+        <div>
+          <span class="text-[11px] font-bold uppercase tracking-widest text-amberwarm">Client Handoff Preview</span>
+          <h3 id="brand-modal-title" class="font-display font-extrabold text-xl sm:text-2xl">Truck Spot — Brand Identity &amp; SVG Pack</h3>
+        </div>
+        <button type="button" onclick="closeBrandModal()" aria-label="Close Brand Assets Modal" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors">
+          ✕
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="p-6 overflow-y-auto space-y-6 custom-scroll bg-cream">
+        <!-- Color Palette Row -->
+        <div>
+          <h4 class="text-xs font-extrabold uppercase tracking-wider text-charcoal/60 mb-3">Brand Color System</h4>
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+            <div class="bg-white p-2 rounded-xl border border-charcoal/10">
+              <div class="h-10 rounded-lg bg-[#FF521B] mb-1.5"></div>
+              <p class="text-[11px] font-bold">Flame Orange</p>
+              <p class="text-[10px] text-charcoal/55 font-mono">#FF521B</p>
+            </div>
+            <div class="bg-white p-2 rounded-xl border border-charcoal/10">
+              <div class="h-10 rounded-lg bg-[#FFB703] mb-1.5"></div>
+              <p class="text-[11px] font-bold">Warm Amber</p>
+              <p class="text-[10px] text-charcoal/55 font-mono">#FFB703</p>
+            </div>
+            <div class="bg-white p-2 rounded-xl border border-charcoal/10">
+              <div class="h-10 rounded-lg bg-[#161925] mb-1.5"></div>
+              <p class="text-[11px] font-bold">Charcoal Slate</p>
+              <p class="text-[10px] text-charcoal/55 font-mono">#161925</p>
+            </div>
+            <div class="bg-white p-2 rounded-xl border border-charcoal/10">
+              <div class="h-10 rounded-lg bg-[#FFF9F5] border border-charcoal/10 mb-1.5"></div>
+              <p class="text-[11px] font-bold">Warm Cream</p>
+              <p class="text-[10px] text-charcoal/55 font-mono">#FFF9F5</p>
+            </div>
+            <div class="bg-white p-2 rounded-xl border border-charcoal/10">
+              <div class="h-10 rounded-lg bg-[#FFFFFF] border border-charcoal/10 mb-1.5"></div>
+              <p class="text-[11px] font-bold">Crisp White</p>
+              <p class="text-[10px] text-charcoal/55 font-mono">#FFFFFF</p>
+            </div>
+            <div class="bg-white p-2 rounded-xl border border-charcoal/10">
+              <div class="h-10 rounded-lg bg-[#10B981] mb-1.5"></div>
+              <p class="text-[11px] font-bold">Fresh Emerald</p>
+              <p class="text-[10px] text-charcoal/55 font-mono">#10B981</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Logo Variants Grid -->
+        <div>
+          <h4 class="text-xs font-extrabold uppercase tracking-wider text-charcoal/60 mb-3">Scalable Vector Logo Variants</h4>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Primary Color Lockup -->
+            <div class="bg-white rounded-2xl border border-charcoal/10 p-5 flex flex-col justify-between gap-4">
+              <span class="text-xs font-bold text-charcoal/60">Primary Color Lockup</span>
+              <div id="preview-logo-color" class="py-5 flex items-center justify-center rounded-xl bg-cream border border-charcoal/5"></div>
+              <button type="button" onclick="downloadBrandSvg('color-lockup')" class="w-full py-2.5 rounded-xl bg-flame hover:bg-flame-dark text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
+                ↓ Download Color SVG
+              </button>
+            </div>
+
+            <!-- Monochrome Dark Lockup -->
+            <div class="bg-white rounded-2xl border border-charcoal/10 p-5 flex flex-col justify-between gap-4">
+              <span class="text-xs font-bold text-charcoal/60">Monochrome Dark (Print / Stamps)</span>
+              <div id="preview-logo-mono-dark" class="py-5 flex items-center justify-center rounded-xl bg-slate-50 border border-charcoal/5"></div>
+              <button type="button" onclick="downloadBrandSvg('mono-dark')" class="w-full py-2.5 rounded-xl bg-charcoal hover:bg-charcoal-light text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
+                ↓ Download Mono Dark SVG
+              </button>
+            </div>
+
+            <!-- Monochrome Light Lockup -->
+            <div class="bg-white rounded-2xl border border-charcoal/10 p-5 flex flex-col justify-between gap-4">
+              <span class="text-xs font-bold text-charcoal/60">Monochrome Light (Dark UI)</span>
+              <div id="preview-logo-mono-light" class="py-5 flex items-center justify-center rounded-xl bg-charcoal border border-charcoal"></div>
+              <button type="button" onclick="downloadBrandSvg('mono-light')" class="w-full py-2.5 rounded-xl bg-charcoal/10 hover:bg-charcoal/20 text-charcoal text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
+                ↓ Download Mono Light SVG
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Favicon Scale Test -->
+        <div class="bg-white rounded-2xl border border-charcoal/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+          <div>
+            <h4 class="text-sm font-extrabold text-charcoal">Favicon &amp; App Icon Legibility Check</h4>
+            <p class="text-xs text-charcoal/60 mt-0.5">Tested down to 16px for crisp readability on browser tabs and mobile screens.</p>
+          </div>
+          <div class="flex items-end gap-5 flex-wrap">
+            <div class="flex flex-col items-center gap-1.5">
+              <div id="favicon-16" class="p-2 rounded-lg bg-cream border border-charcoal/10 flex items-center justify-center"></div>
+              <span class="text-[10px] font-mono text-charcoal/60">16×16px</span>
+            </div>
+            <div class="flex flex-col items-center gap-1.5">
+              <div id="favicon-32" class="p-2 rounded-lg bg-cream border border-charcoal/10 flex items-center justify-center"></div>
+              <span class="text-[10px] font-mono text-charcoal/60">32×32px</span>
+            </div>
+            <div class="flex flex-col items-center gap-1.5">
+              <div id="favicon-64" class="p-2 rounded-xl bg-cream border border-charcoal/10 flex items-center justify-center"></div>
+              <span class="text-[10px] font-mono text-charcoal/60">64×64px</span>
+            </div>
+            <button type="button" onclick="downloadBrandSvg('favicon-mark')" class="px-4 py-2.5 rounded-xl bg-amberwarm hover:bg-amberwarm/90 text-charcoal text-xs font-extrabold transition-colors">
+              ↓ Download Favicon SVG
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TOAST NOTIFICATION BANNER (No alert() dialogs)                        -->
+  <!-- ===================================================================== -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-[60] max-w-sm w-[calc(100%-2.5rem)] pointer-events-none flex flex-col gap-2"></div>
+
+  <!-- Leaflet.js JavaScript CDN -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- ===================================================================== -->
+  <!-- APPLICATION LOGIC (VANILLA JS)                                        -->
+  <!-- ===================================================================== -->
+  <script>
+    /**
+     * =========================================================================
+     * 1. FOOD TRUCK DATASET (6 REALISTIC AUSTIN, TX STREET FOOD TRUCKS)
+     * =========================================================================
+     */
+    const CUISINES = ['All', 'Tacos', 'Burgers', 'BBQ', 'Asian Fusion', 'Desserts'];
+
+    const FOOD_TRUCKS = [
+      {
+        id: 'el-fuego',
+        name: 'El Fuego Tacos',
+        cuisine: 'Tacos',
+        emoji: '🌮',
+        status: 'open', // 'open' | 'closing' | 'closed'
+        statusLabel: 'Open Now',
+        hoursToday: '11:00 AM – 10:00 PM',
+        location: 'South Congress Food Park',
+        distance: '0.2 mi',
+        rating: 4.9,
+        reviews: 318,
+        coords: [30.2589, -97.7495],
+        accentGradient: 'from-[#FF521B] to-[#FF8533]',
+        accentHex: '#FF521B',
+        tagline: 'Slow-braised birria, handmade corn tortillas & fiery house salsas.',
+        signatureItems: [
+          { name: 'Birria Quesatacos (3)', price: '$11.50', desc: 'Crispy dipped tortillas, Oaxaca cheese, rich consommé', tags: ['GF'] },
+          { name: 'Al Pastor Street Tacos', price: '$9.50', desc: 'Spit-roasted pork, charred pineapple, cilantro, onion', tags: ['Spicy'] },
+          { name: 'Loaded Elote Cup', price: '$6.00', desc: 'Fire-roasted corn, cotija, lime crema, Tajín', tags: ['V', 'GF'] }
+        ],
+        fullMenu: [
+          { name: 'Birria Quesatacos (3)', price: '$11.50', desc: 'Crispy dipped tortillas, Oaxaca cheese, rich beef consommé', tags: ['Best Seller', 'GF'] },
+          { name: 'Al Pastor Street Tacos (3)', price: '$9.50', desc: 'Spit-roasted pork, charred pineapple, cilantro, white onion', tags: ['Spicy'] },
+          { name: 'Crispy Avocado Tacos (2)', price: '$9.00', desc: 'Tempura avocado, chipotle slaw, pickled red onion', tags: ['V'] },
+          { name: 'Carne Asada Vampiro', price: '$8.50', desc: 'Toasted corn tostada, melted cheese, mesquite steak', tags: ['GF'] },
+          { name: 'Loaded Elote Cup', price: '$6.00', desc: 'Fire-roasted sweet corn, cotija, lime crema, chili dust', tags: ['V', 'GF'] },
+          { name: 'Hibiscus Agua Fresca', price: '$4.50', desc: 'Freshly brewed jamaica with a squeeze of key lime', tags: ['Vegan'] }
+        ],
+        weeklyHours: [
+          { day: 'Mon – Thu', time: '11:00 AM – 9:30 PM' },
+          { day: 'Fri – Sat', time: '11:00 AM – 11:30 PM' },
+          { day: 'Sunday', time: '11:30 AM – 8:30 PM' }
+        ]
+      },
+      {
+        id: 'smash-roll',
+        name: 'Smash & Roll',
+        cuisine: 'Burgers',
+        emoji: '🍔',
+        status: 'open',
+        statusLabel: 'Open Now',
+        hoursToday: '11:30 AM – 11:00 PM',
+        location: 'Rainey Street Corner Lot',
+        distance: '0.4 mi',
+        rating: 4.8,
+        reviews: 274,
+        coords: [30.2598, -97.7385],
+        accentGradient: 'from-[#E03E0B] to-[#FFB703]',
+        accentHex: '#E03E0B',
+        tagline: 'Lacy-edge double wagyu smashburgers on toasted brioche.',
+        signatureItems: [
+          { name: 'Double Truffle Smash', price: '$12.00', desc: 'Double beef, aged cheddar, caramelized onions, truffle aioli', tags: [] },
+          { name: 'Jalapeño Crunch Burger', price: '$11.50', desc: 'Pepper jack, crispy fried jalapeños, smoky comeback sauce', tags: ['Spicy'] },
+          { name: 'Rosemary Tallow Fries', price: '$5.50', desc: 'Hand-cut crispy fries tossed in sea salt & fresh rosemary', tags: ['GF'] }
+        ],
+        fullMenu: [
+          { name: 'Double Truffle Smash', price: '$12.00', desc: 'Two crisp-edged beef patties, aged cheddar, caramelized onions', tags: ['Best Seller'] },
+          { name: 'Jalapeño Crunch Burger', price: '$11.50', desc: 'Pepper jack, crispy jalapeños, house comeback sauce', tags: ['Spicy'] },
+          { name: 'Classic Backyard Single', price: '$8.50', desc: 'American cheese, house dill pickles, shaved onion, mustard', tags: [] },
+          { name: 'Crispy Maitake Shroom', price: '$11.00', desc: 'Fried maitake mushroom patty, garlic herb mayo, slaw', tags: ['V'] },
+          { name: 'Rosemary Tallow Fries', price: '$5.50', desc: 'Twice-fried Idaho potatoes with garlic aioli dip', tags: ['GF'] },
+          { name: 'Salted Caramel Shake', price: '$6.50', desc: 'Hand-spun custard with sea salt caramel swirl', tags: ['V'] }
+        ],
+        weeklyHours: [
+          { day: 'Mon – Wed', time: '11:30 AM – 9:30 PM' },
+          { day: 'Thu – Sat', time: '11:30 AM – 12:30 AM' },
+          { day: 'Sunday', time: '12:00 PM – 9:00 PM' }
+        ]
+      },
+      {
+        id: 'smokehouse-express',
+        name: 'Smokehouse Express',
+        cuisine: 'BBQ',
+        emoji: '🔥',
+        status: 'closing',
+        statusLabel: 'Closing Soon',
+        hoursToday: '11:00 AM – 3:30 PM',
+        location: 'East 6th Pit Yard',
+        distance: '0.7 mi',
+        rating: 4.9,
+        reviews: 412,
+        coords: [30.2645, -97.7282],
+        accentGradient: 'from-[#9A3412] to-[#EA580C]',
+        accentHex: '#9A3412',
+        tagline: '14-hour post-oak smoked Texas brisket until sold out daily.',
+        signatureItems: [
+          { name: 'Prime Brisket Sandwich', price: '$14.50', desc: 'Thick-cut fatty brisket, house pickles, tangy espresso BBQ', tags: [] },
+          { name: 'Jalapeño Cheddar Sausage', price: '$8.50', desc: 'House-ground pork link smoked over Central Texas oak', tags: ['GF', 'Spicy'] },
+          { name: 'Smoked Brisket Mac', price: '$9.50', desc: 'Three-cheese cavatappi topped with burnt ends', tags: [] }
+        ],
+        fullMenu: [
+          { name: 'Prime Brisket Sandwich', price: '$14.50', desc: '14-hour oak-smoked brisket on buttered potato roll', tags: ['Best Seller'] },
+          { name: '1/2 lb Fatty Brisket Plate', price: '$17.00', desc: 'Served with pickles, pickled onions & Texas toast', tags: ['GF option'] },
+          { name: 'Jalapeño Cheddar Sausage', price: '$8.50', desc: 'Snap-casing handmade pork sausage link', tags: ['GF', 'Spicy'] },
+          { name: 'Glazed Pork Spare Ribs (3)', price: '$13.50', desc: 'Apple-cider spritzed ribs with black pepper bark', tags: ['GF'] },
+          { name: 'Smoked Brisket Mac & Cheese', price: '$9.50', desc: 'Creamy cheddar & gouda mac crowned with burnt ends', tags: [] },
+          { name: 'Bourbon Peach Cobbler', price: '$6.50', desc: 'Warm cinnamon crust with vanilla bean cream', tags: ['V'] }
+        ],
+        weeklyHours: [
+          { day: 'Tue – Fri', time: '11:00 AM – 3:30 PM (or Sellout)' },
+          { day: 'Sat – Sun', time: '10:30 AM – 4:00 PM (or Sellout)' },
+          { day: 'Monday', time: 'Closed (Resting the Pit)' }
+        ]
+      },
+      {
+        id: 'bao-street',
+        name: 'Bao Street Kitchen',
+        cuisine: 'Asian Fusion',
+        emoji: '🥟',
+        status: 'open',
+        statusLabel: 'Open Now',
+        hoursToday: '11:30 AM – 9:30 PM',
+        location: 'Downtown 2nd St Promenade',
+        distance: '0.3 mi',
+        rating: 4.8,
+        reviews: 229,
+        coords: [30.2666, -97.7468],
+        accentGradient: 'from-[#0F766E] to-[#10B981]',
+        accentHex: '#0F766E',
+        tagline: 'Pillow-soft steamed bao buns & crispy Taiwanese street snacks.',
+        signatureItems: [
+          { name: 'Glazed Pork Belly Bao (2)', price: '$10.50', desc: 'Five-spice braised belly, pickled mustard greens, crushed peanuts', tags: [] },
+          { name: 'Crispy Shiitake Bao (2)', price: '$9.50', desc: 'Tempura shiitake, hoisin glaze, cucumber ribbons, scallion', tags: ['Vegan'] },
+          { name: 'Spicy Chili Wontons', price: '$8.00', desc: 'Silky pork & ginger wontons in Sichuan chili crisp oil', tags: ['Spicy'] }
+        ],
+        fullMenu: [
+          { name: 'Glazed Pork Belly Bao (2)', price: '$10.50', desc: 'Melt-in-mouth pork belly, pickled greens, roasted peanuts', tags: ['Best Seller'] },
+          { name: 'Crispy Shiitake Bao (2)', price: '$9.50', desc: 'Crisp shiitake mushrooms, cucumber, sweet hoisin', tags: ['Vegan'] },
+          { name: 'Hot Honey Fried Chicken Bao', price: '$11.00', desc: 'Taiwanese basil chicken, chili honey, yuzu slaw', tags: ['Spicy'] },
+          { name: 'Spicy Chili Oil Wontons (6)', price: '$8.00', desc: 'Handmade wontons swimming in aromatic black vinegar & chili oil', tags: ['Spicy'] },
+          { name: 'Garlic Sesame Green Beans', price: '$6.50', desc: 'Blistered beans tossed in crispy garlic & toasted sesame', tags: ['Vegan', 'GF'] },
+          { name: 'Yuzu Sparkling Lemonade', price: '$4.50', desc: 'Bright Japanese citrus fizz over pebble ice', tags: ['Vegan'] }
+        ],
+        weeklyHours: [
+          { day: 'Mon – Thu', time: '11:30 AM – 9:30 PM' },
+          { day: 'Fri – Sat', time: '11:30 AM – 11:00 PM' },
+          { day: 'Sunday', time: '12:00 PM – 8:30 PM' }
+        ]
+      },
+      {
+        id: 'seoul-skewers',
+        name: 'Seoul Skewers',
+        cuisine: 'Asian Fusion',
+        emoji: '🍢',
+        status: 'closed',
+        statusLabel: 'Opens at 5 PM',
+        hoursToday: '5:00 PM – 11:30 PM',
+        location: 'East Cesar Chavez Night Market',
+        distance: '0.9 mi',
+        rating: 4.9,
+        reviews: 196,
+        coords: [30.2562, -97.7248],
+        accentGradient: 'from-[#4338CA] to-[#7C3AED]',
+        accentHex: '#4338CA',
+        tagline: 'Charcoal-grilled Korean yakitori skewers, kimchi fries & late-night bites.',
+        signatureItems: [
+          { name: 'Gochujang Chicken Skewers', price: '$10.00', desc: 'Charcoal-kissed thigh skewers brushed with sweet-heat glaze', tags: ['Spicy'] },
+          { name: 'Bulgogi Kimchi Fries', price: '$12.50', desc: 'Marinated ribeye, caramelized kimchi, spicy mayo, scallions', tags: [] },
+          { name: 'Honey Butter Rice Cakes', price: '$7.50', desc: 'Crispy skewered tteokbokki with sweet garlic glaze', tags: ['V'] }
+        ],
+        fullMenu: [
+          { name: 'Gochujang Chicken Skewers (3)', price: '$10.00', desc: 'Binchotan grilled chicken thighs with toasted sesame', tags: ['Best Seller', 'Spicy'] },
+          { name: 'Galbi Short Rib Skewers (2)', price: '$13.00', desc: 'Soy-pear marinated prime beef short rib', tags: [] },
+          { name: 'Bulgogi Kimchi Fries', price: '$12.50', desc: 'Crispy fries loaded with ribeye, sautéed kimchi & gochujang crema', tags: ['Spicy'] },
+          { name: 'Honey Butter Rice Cakes', price: '$7.50', desc: 'Chewy outside-crisp Korean rice cakes on skewers', tags: ['V'] },
+          { name: 'Garlic Soy Cauliflower', price: '$8.50', desc: 'Double-fried florets tossed in sweet soy glaze', tags: ['Vegan'] },
+          { name: 'Chilled Peach Makgeolli Mocktail', price: '$5.00', desc: 'Creamy sparkling white peach refresher', tags: ['Vegan'] }
+        ],
+        weeklyHours: [
+          { day: 'Wed – Thu', time: '5:00 PM – 10:30 PM' },
+          { day: 'Fri – Sat', time: '5:00 PM – 12:30 AM' },
+          { day: 'Sun – Tue', time: '5:00 PM – 9:30 PM' }
+        ]
+      },
+      {
+        id: 'waffle-wagon',
+        name: 'Waffle Wagon',
+        cuisine: 'Desserts',
+        emoji: '🧇',
+        status: 'open',
+        statusLabel: 'Open Now',
+        hoursToday: '10:00 AM – 10:00 PM',
+        location: 'Zilker Barton Springs Lot',
+        distance: '0.6 mi',
+        rating: 4.9,
+        reviews: 287,
+        coords: [30.2624, -97.7618],
+        accentGradient: 'from-[#D97706] to-[#FFB703]',
+        accentHex: '#D97706',
+        tagline: 'Caramelized pearl-sugar Belgian Liege waffles baked fresh to order.',
+        signatureItems: [
+          { name: 'Churro Dulce Waffle', price: '$9.00', desc: 'Cinnamon sugar Liege waffle, warm dulce de leche, whipped cream', tags: ['V'] },
+          { name: 'Berry Nutella Crunch', price: '$9.50', desc: 'Fresh strawberries, hazelnut spread, roasted hazelnuts', tags: ['V'] },
+          { name: 'Cold Brew Affogato', price: '$6.50', desc: 'Velvety vanilla gelato drowned in local Austin cold brew', tags: ['V', 'GF'] }
+        ],
+        fullMenu: [
+          { name: 'Churro Dulce Liege Waffle', price: '$9.00', desc: 'Pearl-sugar brioche dough, cinnamon crunch, warm caramel', tags: ['Best Seller', 'V'] },
+          { name: 'Berry Nutella Crunch', price: '$9.50', desc: 'Macerated berries, Nutella drizzle, toasted hazelnuts', tags: ['V'] },
+          { name: 'Matcha White Choc Waffle', price: '$9.50', desc: 'Ceremonial matcha glaze, white chocolate curls, mochi bites', tags: ['V'] },
+          { name: 'S\'mores Campfire Waffle', price: '$10.00', desc: 'Torched marshmallow fluff, dark chocolate ganache, graham crumble', tags: ['V'] },
+          { name: 'Cold Brew Affogato', price: '$6.50', desc: 'Local cold brew poured over house vanilla bean gelato', tags: ['V', 'GF'] },
+          { name: 'Spiced Horchata Latte', price: '$5.50', desc: 'Iced espresso blended with house cinnamon rice milk', tags: ['V'] }
+        ],
+        weeklyHours: [
+          { day: 'Mon – Thu', time: '10:00 AM – 9:30 PM' },
+          { day: 'Fri – Sat', time: '9:00 AM – 11:00 PM' },
+          { day: 'Sunday', time: '9:00 AM – 9:00 PM' }
+        ]
+      }
+    ];
+
+    /**
+     * =========================================================================
+     * 2. APPLICATION STATE
+     * =========================================================================
+     */
+    const state = {
+      selectedCuisine: 'All',
+      openNowOnly: false,
+      searchQuery: '',
+      activeTruckId: null,
+      pushEnabled: false,
+      map: null,
+      markers: {}
+    };
+
+    const AUSTIN_CENTER = [30.2625, -97.7435];
+    const DEFAULT_ZOOM = 14;
+
+    /**
+     * =========================================================================
+     * 3. STANDALONE SCALABLE SVG TEMPLATES (FOR PREVIEW & CLIENT DOWNLOADS)
+     * =========================================================================
+     */
+    function getLogoSvgMarkup(variant, size = null) {
+      if (variant === 'favicon-mark') {
+        const dim = size ? `width="${size}" height="${size}"` : `width="64" height="64"`;
+        return `<svg xmlns="http://www.w3.org/2000/svg" ${dim} viewBox="0 0 64 64" fill="none">
+  <rect x="3" y="18" width="11" height="4" rx="2" fill="#FFB703"/>
+  <rect x="1" y="26" width="14" height="4" rx="2" fill="#FF521B"/>
+  <rect x="6" y="34" width="9" height="4" rx="2" fill="#FFB703"/>
+  <path d="M38 6C25.297 6 15 16.074 15 28.5C15 43.1 34.4 58.1 36.7 59.8C37.47 60.38 38.53 60.38 39.3 59.8C41.6 58.1 61 43.1 61 28.5C61 16.074 50.703 6 38 6Z" fill="#FF521B"/>
+  <circle cx="38" cy="27.5" r="16.5" fill="#161925"/>
+  <path d="M25.5 22.5C25.5 21.12 26.62 20 28 20H41.5C42.6 20 43.5 20.9 43.5 22V24H46.8C47.74 24 48.6 24.53 49.02 25.37L50.7 28.74C50.9 29.13 51 29.56 51 30V33C51 34.1 50.1 35 49 35H27.5C26.4 35 25.5 34.1 25.5 33V22.5Z" fill="#FFFFFF"/>
+  <path d="M28 22.5H40.5L41.5 25.5H27L28 22.5Z" fill="#FFB703"/>
+  <rect x="28.5" y="26.8" width="10.5" height="4" rx="1" fill="#161925"/>
+  <path d="M44.5 25.8H47.2L48.6 28.8H44.5V25.8Z" fill="#161925"/>
+  <circle cx="31.5" cy="35.2" r="3.4" fill="#FF521B" stroke="#FFFFFF" stroke-width="1.6"/>
+  <circle cx="45.2" cy="35.2" r="3.4" fill="#FF521B" stroke="#FFFFFF" stroke-width="1.6"/>
+</svg>`;
+      }
+
+      const themes = {
+        'color-lockup': {
+          line1: '#FFB703', line2: '#FF521B', pin: '#FF521B', disc: '#161925',
+          truck: '#FFFFFF', awning: '#FFB703', wheel: '#FF521B',
+          word1: '#161925', word2: '#FF521B', sub: '#64748B'
+        },
+        'mono-dark': {
+          line1: '#161925', line2: '#161925', pin: '#161925', disc: '#FFFFFF',
+          truck: '#161925', awning: '#161925', wheel: '#FFFFFF',
+          word1: '#161925', word2: '#161925', sub: '#475569'
+        },
+        'mono-light': {
+          line1: '#FFFFFF', line2: '#FFFFFF', pin: '#FFFFFF', disc: '#161925',
+          truck: '#FFFFFF', awning: '#FFFFFF', wheel: '#161925',
+          word1: '#FFFFFF', word2: '#FFFFFF', sub: '#CBD5E1'
+        }
+      };
+
+      const t = themes[variant] || themes['color-lockup'];
+      const wheelStroke = variant === 'mono-dark' ? '#161925' : '#FFFFFF';
+      const windowFill = variant === 'mono-dark' ? '#FFFFFF' : '#161925';
+
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="210" height="58" viewBox="0 0 220 64" fill="none">
+  <rect x="3" y="18" width="11" height="4" rx="2" fill="${t.line1}" opacity="0.85"/>
+  <rect x="1" y="26" width="14" height="4" rx="2" fill="${t.line2}"/>
+  <rect x="6" y="34" width="9" height="4" rx="2" fill="${t.line1}" opacity="0.85"/>
+  <path d="M38 6C25.297 6 15 16.074 15 28.5C15 43.1 34.4 58.1 36.7 59.8C37.47 60.38 38.53 60.38 39.3 59.8C41.6 58.1 61 43.1 61 28.5C61 16.074 50.703 6 38 6Z" fill="${t.pin}"/>
+  <circle cx="38" cy="27.5" r="16.5" fill="${t.disc}"/>
+  <path d="M25.5 22.5C25.5 21.12 26.62 20 28 20H41.5C42.6 20 43.5 20.9 43.5 22V24H46.8C47.74 24 48.6 24.53 49.02 25.37L50.7 28.74C50.9 29.13 51 29.56 51 30V33C51 34.1 50.1 35 49 35H27.5C26.4 35 25.5 34.1 25.5 33V22.5Z" fill="${t.truck}"/>
+  <path d="M28 22.5H40.5L41.5 25.5H27L28 22.5Z" fill="${t.awning}"/>
+  <rect x="28.5" y="26.8" width="10.5" height="4" rx="1" fill="${windowFill}"/>
+  <path d="M44.5 25.8H47.2L48.6 28.8H44.5V25.8Z" fill="${windowFill}"/>
+  <circle cx="31.5" cy="35.2" r="3.4" fill="${t.wheel}" stroke="${wheelStroke}" stroke-width="1.6"/>
+  <circle cx="45.2" cy="35.2" r="3.4" fill="${t.wheel}" stroke="${wheelStroke}" stroke-width="1.6"/>
+  <text x="72" y="36" font-family="Plus Jakarta Sans, Inter, sans-serif" font-weight="800" font-size="27" letter-spacing="-0.6" fill="${t.word1}">Truck<tspan fill="${t.word2}">Spot</tspan></text>
+  <text x="73" y="50" font-family="Inter, sans-serif" font-weight="700" font-size="9.5" letter-spacing="2.2" fill="${t.sub}">LIVE STREET FOOD</text>
+</svg>`;
+    }
+
+    /**
+     * Triggers a clean one-click SVG file download for client review.
+     */
+    function downloadBrandSvg(variant) {
+      try {
+        const svgContent = getLogoSvgMarkup(variant);
+        const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `truck-spot-${variant}.svg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showToast(`Downloaded truck-spot-${variant}.svg`, 'success');
+      } catch (err) {
+        console.error('SVG download failed:', err);
+        showToast('Unable to download SVG in this browser context.', 'error');
+      }
+    }
+
+    /**
+     * =========================================================================
+     * 4. LEAFLET MAP INITIALIZATION & CUSTOM MARKERS
+     * =========================================================================
+     */
+    function initInteractiveMap() {
+      const mapEl = document.getElementById('leaflet-map');
+      if (!mapEl) return;
+
+      try {
+        if (typeof L === 'undefined') {
+          throw new Error('Leaflet library failed to load.');
+        }
+
+        state.map = L.map('leaflet-map', {
+          center: AUSTIN_CENTER,
+          zoom: DEFAULT_ZOOM,
+          zoomControl: true,
+          scrollWheelZoom: false // Prevents accidental page-scroll hijacking
+        });
+
+        /*
+         * -----------------------------------------------------------------------
+         * MAP PROVIDER CONFIGURATION (CartoDB Voyager — Free, Clean, No Key Needed)
+         * -----------------------------------------------------------------------
+         * To swap in MAPBOX later, replace the tileLayer URL below with:
+         *   'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=YOUR_MAPBOX_ACCESS_TOKEN'
+         *   and pass { tileSize: 512, zoomOffset: -1, attribution: '© Mapbox' }
+         *
+         * To swap in GOOGLE MAPS later:
+         *   Load the Google Maps JS API script with your API key and instantiate
+         *   `new google.maps.Map(document.getElementById('leaflet-map'), { center, zoom })`
+         *   using the same FOOD_TRUCKS array coordinates.
+         * -----------------------------------------------------------------------
+         */
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }).addTo(state.map);
+
+        // Enable scroll zoom cleanly once user clicks inside the map
+        state.map.on('click', () => {
+          state.map.scrollWheelZoom.enable();
+        });
+        state.map.on('mouseout', () => {
+          state.map.scrollWheelZoom.disable();
+        });
+
+        // Create styled HTML/SVG markers for each truck
+        FOOD_TRUCKS.forEach((truck) => {
+          const pulseColor =
+            truck.status === 'open'
+              ? 'rgba(16, 185, 129, 0.45)'
+              : truck.status === 'closing'
+              ? 'rgba(255, 183, 3, 0.45)'
+              : 'rgba(22, 25, 37, 0.2)';
+
+          const badgeBorder =
+            truck.status === 'open'
+              ? '#10B981'
+              : truck.status === 'closing'
+              ? '#FFB703'
+              : '#64748B';
+
+          const markerHtml = `
+            <div class="marker-pin-wrapper" data-marker-id="${truck.id}">
+              ${truck.status === 'open' ? `<span class="marker-pulse" style="background:${pulseColor};"></span>` : ''}
+              <div class="marker-core flex flex-col items-center">
+                <div style="background:#161925; border: 2.5px solid ${badgeBorder};" class="w-11 h-11 rounded-2xl shadow-lg flex items-center justify-center text-xl">
+                  ${truck.emoji}
+                </div>
+                <div style="width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; border-top:7px solid ${badgeBorder}; margin-top:-1px;"></div>
+              </div>
+            </div>
+          `;
+
+          const customIcon = L.divIcon({
+            html: markerHtml,
+            className: 'truck-spot-div-icon',
+            iconSize: [44, 52],
+            iconAnchor: [22, 50],
+            popupAnchor: [0, -48]
+          });
+
+          const marker = L.marker(truck.coords, { icon: customIcon }).addTo(state.map);
+
+          // Styled Leaflet Popup Content
+          const statusColorClass = getStatusBadgeClasses(truck.status);
+          const popupHtml = `
+            <div class="bg-white">
+              <div class="px-4 py-3 bg-gradient-to-r ${truck.accentGradient} text-white flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-xl">${truck.emoji}</span>
+                  <div>
+                    <h4 class="font-display font-extrabold text-sm leading-tight">${truck.name}</h4>
+                    <span class="text-[11px] text-white/90 font-medium">${truck.cuisine} • ★ ${truck.rating}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${statusColorClass}">
+                    <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                    ${truck.statusLabel}
+                  </span>
+                  <span class="text-xs font-bold text-charcoal/65">📍 ${truck.distance}</span>
+                </div>
+                <div class="text-xs text-charcoal/75 space-y-1">
+                  <p class="font-semibold text-charcoal">${truck.location}</p>
+                  <p>🕒 ${truck.hoursToday}</p>
+                </div>
+                <div class="pt-1 flex gap-2">
+                  <button type="button" onclick="scrollToMenuCard('${truck.id}')" class="flex-1 py-2 px-3 rounded-xl bg-flame hover:bg-flame-dark text-white text-xs font-bold transition-colors cursor-pointer">
+                    See Menu ↓
+                  </button>
+                  <button type="button" onclick="openMenuModal('${truck.id}')" class="py-2 px-3 rounded-xl bg-cream hover:bg-charcoal/10 text-charcoal text-xs font-bold transition-colors cursor-pointer">
+                    Hours
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+
+          marker.bindPopup(popupHtml, { maxWidth: 280, closeButton: true });
+
+          marker.on('click', () => {
+            setActiveTruck(truck.id, false);
+          });
+
+          state.markers[truck.id] = marker;
+        });
+
+        // Handle resize cleanly
+        window.addEventListener('resize', () => {
+          if (state.map) state.map.invalidateSize();
+        });
+      } catch (err) {
+        console.error('Map initialization error:', err);
+        mapEl.innerHTML = `
+          <div class="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-cream">
+            <span class="text-4xl mb-2">🗺️</span>
+            <p class="font-display font-bold text-charcoal">Live Map Preview Unavailable Offline</p>
+            <p class="text-xs text-charcoal/60 mt-1">All 6 food trucks remain browsable in the list and menu cards.</p>
+          </div>
+        `;
+      }
+    }
+
+    function recenterMap() {
+      if (!state.map) return;
+      state.map.flyTo(AUSTIN_CENTER, DEFAULT_ZOOM, { duration: 0.7 });
+    }
+
+    /**
+     * =========================================================================
+     * 5. FILTERING, SYNCED RENDERING (MAP LIST + MENU CARDS)
+     * =========================================================================
+     */
+    function getStatusBadgeClasses(status) {
+      if (status === 'open') return 'bg-fresh/15 text-[#047857]';
+      if (status === 'closing') return 'bg-amberwarm/25 text-[#92400E]';
+      return 'bg-charcoal/10 text-charcoal/70';
+    }
+
+    function getFilteredTrucks() {
+      const q = state.searchQuery.trim().toLowerCase();
+      return FOOD_TRUCKS.filter((truck) => {
+        const matchesCuisine = state.selectedCuisine === 'All' || truck.cuisine === state.selectedCuisine;
+        const matchesOpen = !state.openNowOnly || truck.status === 'open';
+        const matchesSearch =
+          !q ||
+          truck.name.toLowerCase().includes(q) ||
+          truck.cuisine.toLowerCase().includes(q) ||
+          truck.location.toLowerCase().includes(q) ||
+          truck.fullMenu.some((item) => item.name.toLowerCase().includes(q));
+        return matchesCuisine && matchesOpen && matchesSearch;
+      });
+    }
+
+    function renderFilterPills() {
+      const mapContainer = document.getElementById('cuisine-filter-pills');
+      const menuContainer = document.getElementById('menu-category-sync-pills');
+
+      const pillHtml = CUISINES.map((cuisine) => {
+        const isActive = state.selectedCuisine === cuisine;
+        const activeClasses = isActive
+          ? 'bg-charcoal text-white shadow-sm'
+          : 'bg-white text-charcoal/75 hover:bg-flame/10 hover:text-flame border border-charcoal/10';
+        return `
+          <button
+            type="button"
+            onclick="setCuisineFilter('${cuisine}')"
+            class="shrink-0 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${activeClasses}"
+          >
+            ${cuisine}
+          </button>
+        `;
+      }).join('');
+
+      if (mapContainer) mapContainer.innerHTML = pillHtml;
+      if (menuContainer) menuContainer.innerHTML = pillHtml;
+
+      const filterBadge = document.getElementById('menu-filter-badge');
+      if (filterBadge) {
+        if (state.selectedCuisine !== 'All' || state.openNowOnly || state.searchQuery.trim()) {
+          filterBadge.classList.remove('hidden');
+          filterBadge.textContent = `Showing: ${state.selectedCuisine}${state.openNowOnly ? ' • Open Now' : ''}`;
+        } else {
+          filterBadge.classList.add('hidden');
+        }
+      }
+    }
+
+    function renderMapAndSideList() {
+      const filtered = getFilteredTrucks();
+      const filteredIds = new Set(filtered.map((t) => t.id));
+      const countEl = document.getElementById('map-results-count');
+      const listEl = document.getElementById('map-truck-list');
+
+      if (countEl) countEl.textContent = filtered.length;
+
+      // Sync Leaflet markers visibility
+      if (state.map) {
+        FOOD_TRUCKS.forEach((truck) => {
+          const marker = state.markers[truck.id];
+          if (!marker) return;
+          const isVisible = filteredIds.has(truck.id);
+          if (isVisible && !state.map.hasLayer(marker)) {
+            marker.addTo(state.map);
+          } else if (!isVisible && state.map.hasLayer(marker)) {
+            marker.closePopup();
+            state.map.removeLayer(marker);
+          }
+        });
+      }
+
+      if (!listEl) return;
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = `
+          <div class="text-center py-12 px-4">
+            <p class="text-3xl mb-2">🍽️</p>
+            <p class="font-bold text-charcoal text-sm">No trucks match your filters.</p>
+            <p class="text-xs text-charcoal/60 mt-1 mb-4">Try clearing your search or turning off "Open Now".</p>
+            <button type="button" onclick="resetAllFilters()" class="px-4 py-2 rounded-xl bg-flame text-white text-xs font-bold">
+              Show All 6 Trucks
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = filtered
+        .map((truck) => {
+          const isActive = state.activeTruckId === truck.id;
+          const badgeClasses = getStatusBadgeClasses(truck.status);
+          return `
+            <button
+              type="button"
+              onclick="focusTruckOnMap('${truck.id}')"
+              class="w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                isActive
+                  ? 'bg-white border-flame ring-2 ring-flame/20 shadow-soft'
+                  : 'bg-white/85 hover:bg-white border-charcoal/10 hover:border-flame/40'
+              }"
+            >
+              <div class="flex items-start justify-between gap-2 mb-1.5">
+                <div class="flex items-center gap-2.5">
+                  <span class="w-9 h-9 rounded-xl bg-cream flex items-center justify-center text-lg shrink-0 border border-charcoal/5">${truck.emoji}</span>
+                  <div>
+                    <h3 class="font-display font-extrabold text-sm text-charcoal leading-tight">${truck.name}</h3>
+                    <p class="text-[11px] font-medium text-charcoal/55">${truck.cuisine} • ${truck.distance}</p>
+                  </div>
+                </div>
+                <span class="shrink-0 text-[11px] font-extrabold text-charcoal bg-amberwarm/20 px-2 py-0.5 rounded-lg">★ ${truck.rating}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-charcoal/5">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeClasses}">
+                  <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                  ${truck.statusLabel}
+                </span>
+                <span class="text-[11px] text-charcoal/60 truncate max-w-[150px]">${truck.hoursToday}</span>
+              </div>
+            </button>
+          `;
+        })
+        .join('');
+    }
+
+    function renderMenuCards() {
+      const gridEl = document.getElementById('menus-card-grid');
+      if (!gridEl) return;
+
+      const filtered = getFilteredTrucks();
+
+      if (filtered.length === 0) {
+        gridEl.innerHTML = `
+          <div class="col-span-full w-full bg-white rounded-3xl border border-charcoal/10 p-10 text-center">
+            <p class="text-4xl mb-3">🔎</p>
+            <h3 class="font-display font-extrabold text-lg text-charcoal">No matching menus found</h3>
+            <p class="text-sm text-charcoal/60 mt-1 mb-5">Reset your active cuisine or status filter to explore all 6 street-food trucks.</p>
+            <button type="button" onclick="resetAllFilters()" class="px-5 py-2.5 rounded-xl bg-flame hover:bg-flame-dark text-white text-sm font-bold">
+              Show All Menus
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      gridEl.innerHTML = filtered
+        .map((truck) => {
+          const statusClasses = getStatusBadgeClasses(truck.status);
+          return `
+            <article
+              id="menu-card-${truck.id}"
+              class="snap-center shrink-0 w-[86vw] sm:w-[360px] md:w-auto bg-white rounded-3xl border border-charcoal/10 shadow-soft hover:shadow-card transition-all duration-300 flex flex-col overflow-hidden"
+            >
+              <!-- Vibrant Cuisine Header Accent -->
+              <div class="relative p-5 bg-gradient-to-br ${truck.accentGradient} text-white">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner">
+                      ${truck.emoji}
+                    </div>
+                    <div>
+                      <span class="inline-block text-[10px] font-extrabold uppercase tracking-widest bg-black/20 px-2.5 py-0.5 rounded-full mb-1">
+                        ${truck.cuisine}
+                      </span>
+                      <h3 class="font-display font-extrabold text-xl leading-tight">${truck.name}</h3>
+                    </div>
+                  </div>
+                  <div class="bg-white text-charcoal px-2.5 py-1 rounded-xl text-xs font-extrabold shadow-sm shrink-0">
+                    ★ ${truck.rating}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card Body -->
+              <div class="p-5 flex-1 flex flex-col">
+                <!-- Status + Location + Hours -->
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${statusClasses}">
+                    <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                    ${truck.statusLabel}
+                  </span>
+                  <span class="text-xs font-semibold text-charcoal/60">🕒 ${truck.hoursToday}</span>
+                </div>
+
+                <p class="text-xs font-medium text-charcoal/65 mb-4 flex items-center gap-1.5">
+                  <span>📍</span>
+                  <span class="font-semibold text-charcoal/85">${truck.location}</span>
+                  <span>•</span>
+                  <span>${truck.distance}</span>
+                </p>
+
+                <!-- Top 3 Signature Menu Items -->
+                <div class="bg-cream rounded-2xl p-3.5 border border-charcoal/5 space-y-2.5 mb-5 flex-1">
+                  <p class="text-[10px] font-extrabold uppercase tracking-wider text-charcoal/45">Top Signature Items</p>
+                  ${truck.signatureItems
+                    .map(
+                      (item) => `
+                    <div class="flex items-start justify-between gap-3 text-sm">
+                      <div>
+                        <p class="font-bold text-charcoal leading-snug">${item.name}</p>
+                        <p class="text-[11px] text-charcoal/60 line-clamp-1">${item.desc}</p>
+                      </div>
+                      <span class="font-extrabold text-flame shrink-0">${item.price}</span>
+                    </div>
+                  `
+                    )
+                    .join('')}
+                </div>
+
+                <!-- Card Actions -->
+                <div class="grid grid-cols-2 gap-2.5 mt-auto">
+                  <button
+                    type="button"
+                    onclick="openMenuModal('${truck.id}')"
+                    class="py-2.5 px-3 rounded-xl bg-charcoal hover:bg-charcoal-light text-white text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    View Full Menu
+                  </button>
+                  <button
+                    type="button"
+                    onclick="findTruckOnMap('${truck.id}')"
+                    class="py-2.5 px-3 rounded-xl bg-flame/10 hover:bg-flame hover:text-white text-flame text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    📍 Find on Map
+                  </button>
+                </div>
+              </div>
+            </article>
+          `;
+        })
+        .join('');
+    }
+
+    function updateAllViews() {
+      renderFilterPills();
+      renderMapAndSideList();
+      renderMenuCards();
+    }
+
+    /**
+     * =========================================================================
+     * 6. INTERACTIVE NAVIGATION & MAP-TO-MENU SYNC HELPERS
+     * =========================================================================
+     */
+    function setCuisineFilter(cuisine) {
+      state.selectedCuisine = cuisine;
+      updateAllViews();
+    }
+
+    function resetAllFilters() {
+      state.selectedCuisine = 'All';
+      state.openNowOnly = false;
+      state.searchQuery = '';
+      const openToggle = document.getElementById('open-now-toggle');
+      const toggleKnob = document.getElementById('open-toggle-knob');
+      const searchInput = document.getElementById('truck-search-input');
+      if (openToggle) openToggle.checked = false;
+      if (toggleKnob) toggleKnob.style.transform = 'translate(2px, 3px)';
+      if (searchInput) searchInput.value = '';
+      updateAllViews();
+      recenterMap();
+    }
+
+    function setActiveTruck(truckId, flyToMarker = true) {
+      state.activeTruckId = truckId;
+      renderMapAndSideList();
+
+      // Update active visual scale on map markers
+      document.querySelectorAll('.marker-pin-wrapper').forEach((el) => {
+        el.classList.toggle('is-active', el.dataset.markerId === truckId);
+      });
+
+      const truck = FOOD_TRUCKS.find((t) => t.id === truckId);
+      const marker = state.markers[truckId];
+      if (truck && marker && state.map && flyToMarker) {
+        state.map.flyTo(truck.coords, 15, { duration: 0.75 });
+        setTimeout(() => {
+          marker.openPopup();
+        }, 300);
+      }
+    }
+
+    function focusTruckOnMap(truckId) {
+      setActiveTruck(truckId, true);
+    }
+
+    function findTruckOnMap(truckId) {
+      // Ensure truck isn't hidden by active filters
+      const visibleIds = new Set(getFilteredTrucks().map((t) => t.id));
+      if (!visibleIds.has(truckId)) {
+        resetAllFilters();
+      }
+      const mapSection = document.getElementById('map-section');
+      if (mapSection) {
+        mapSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      setTimeout(() => {
+        setActiveTruck(truckId, true);
+      }, 450);
+    }
+
+    function focusTruckFromHero(truckId) {
+      findTruckOnMap(truckId);
+    }
+
+    function scrollToMenuCard(truckId) {
+      const card = document.getElementById(`menu-card-${truckId}`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      card.classList.remove('card-highlight-flash');
+      void card.offsetWidth; // Force reflow to restart animation
+      card.classList.add('card-highlight-flash');
+    }
+
+    /**
+     * =========================================================================
+     * 7. FULL MENU & BRAND ASSETS MODALS
+     * =========================================================================
+     */
+    function openMenuModal(truckId) {
+      const truck = FOOD_TRUCKS.find((t) => t.id === truckId);
+      if (!truck) return;
+
+      const modal = document.getElementById('full-menu-modal');
+      const header = document.getElementById('menu-modal-header');
+      const headerContent = document.getElementById('menu-modal-header-content');
+      const body = document.getElementById('menu-modal-body');
+      const mapBtn = document.getElementById('menu-modal-map-btn');
+
+      header.className = `p-6 text-white relative bg-gradient-to-r ${truck.accentGradient}`;
+      headerContent.innerHTML = `
+        <div class="flex items-center gap-3.5 pr-10">
+          <span class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl shrink-0">${truck.emoji}</span>
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[11px] font-extrabold uppercase tracking-wider bg-black/20 px-2.5 py-0.5 rounded-full">${truck.cuisine}</span>
+              <span class="text-xs font-bold">★ ${truck.rating} (${truck.reviews} reviews)</span>
+            </div>
+            <h3 id="menu-modal-title" class="font-display font-extrabold text-2xl leading-tight">${truck.name}</h3>
+            <p class="text-xs text-white/90 mt-1">${truck.tagline}</p>
+          </div>
+        </div>
+      `;
+
+      body.innerHTML = `
+        <!-- Live Location & Today Strip -->
+        <div class="flex flex-wrap items-center justify-between gap-3 bg-cream p-4 rounded-2xl border border-charcoal/10 text-xs sm:text-sm">
+          <div>
+            <p class="font-bold text-charcoal">📍 ${truck.location} <span class="text-charcoal/55 font-medium">(${truck.distance})</span></p>
+            <p class="text-charcoal/65 mt-0.5">Today: <strong class="text-charcoal">${truck.hoursToday}</strong></p>
+          </div>
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${getStatusBadgeClasses(truck.status)}">
+            <span class="w-2 h-2 rounded-full bg-current"></span>
+            ${truck.statusLabel}
+          </span>
+        </div>
+
+        <!-- Full Menu List -->
+        <div>
+          <h4 class="text-xs font-extrabold uppercase tracking-wider text-charcoal/55 mb-3">Full Street Menu</h4>
+          <div class="divide-y divide-charcoal/10 border border-charcoal/10 rounded-2xl overflow-hidden">
+            ${truck.fullMenu
+              .map(
+                (item) => `
+              <div class="p-4 bg-white flex items-start justify-between gap-4 hover:bg-cream/60 transition-colors">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-bold text-sm text-charcoal">${item.name}</span>
+                    ${item.tags
+                      .map((tag) => {
+                        const tagStyle =
+                          tag === 'Best Seller'
+                            ? 'bg-amberwarm/25 text-[#92400E]'
+                            : tag === 'Spicy'
+                            ? 'bg-flame/15 text-flame'
+                            : 'bg-fresh/15 text-[#047857]';
+                        return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${tagStyle}">${tag}</span>`;
+                      })
+                      .join('')}
+                  </div>
+                  <p class="text-xs text-charcoal/65 mt-1">${item.desc}</p>
+                </div>
+                <span class="font-display font-extrabold text-sm text-flame shrink-0">${item.price}</span>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
+        </div>
+
+        <!-- Weekly Operating Hours -->
+        <div>
+          <h4 class="text-xs font-extrabold uppercase tracking-wider text-charcoal/55 mb-3">Weekly Operating Hours</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            ${truck.weeklyHours
+              .map(
+                (row) => `
+              <div class="p-3.5 rounded-xl bg-cream border border-charcoal/10">
+                <p class="text-xs font-extrabold text-charcoal">${row.day}</p>
+                <p class="text-xs text-charcoal/70 mt-1">${row.time}</p>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
+        </div>
+      `;
+
+      mapBtn.onclick = () => {
+        closeMenuModal();
+        findTruckOnMap(truck.id);
+      };
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeMenuModal() {
+      const modal = document.getElementById('full-menu-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      document.body.style.overflow = '';
+    }
+
+    function openBrandModal() {
+      // Populate live inline SVG previews inside modal
+      document.getElementById('preview-logo-color').innerHTML = getLogoSvgMarkup('color-lockup');
+      document.getElementById('preview-logo-mono-dark').innerHTML = getLogoSvgMarkup('mono-dark');
+      document.getElementById('preview-logo-mono-light').innerHTML = getLogoSvgMarkup('mono-light');
+      document.getElementById('favicon-16').innerHTML = getLogoSvgMarkup('favicon-mark', 16);
+      document.getElementById('favicon-32').innerHTML = getLogoSvgMarkup('favicon-mark', 32);
+      document.getElementById('favicon-64').innerHTML = getLogoSvgMarkup('favicon-mark', 64);
+
+      const modal = document.getElementById('brand-assets-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeBrandModal() {
+      const modal = document.getElementById('brand-assets-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      document.body.style.overflow = '';
+    }
+
+    /**
+     * =========================================================================
+     * 8. APP STORE CTA, OPT-IN FORM & TOAST FEEDBACK
+     * =========================================================================
+     */
+    function handleAppDownloadClick(storeName) {
+      showToast(`Truck Spot is launching soon on ${storeName}! Join the alert list below for early access + $5 credit.`, 'info');
+      const alertsSection = document.getElementById('alerts-section');
+      if (alertsSection) {
+        alertsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+          const emailInput = document.getElementById('optin-email');
+          if (emailInput) emailInput.focus({ preventScroll: true });
+        }, 650);
+      }
+    }
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+
+      const styles = {
+        success: 'bg-charcoal text-white border-l-4 border-fresh',
+        info: 'bg-charcoal text-white border-l-4 border-flame',
+        error: 'bg-charcoal text-white border-l-4 border-amberwarm'
+      };
+
+      const toast = document.createElement('div');
+      toast.className = `pointer-events-auto px-4 py-3.5 rounded-2xl shadow-2xl text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 transition-all duration-300 translate-y-3 opacity-0 ${styles[type] || styles.info}`;
+      toast.innerHTML = `
+        <span>${message}</span>
+        <button type="button" class="text-white/60 hover:text-white font-bold shrink-0" aria-label="Dismiss">✕</button>
+      `;
+
+      toast.querySelector('button').onclick = () => toast.remove();
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-3', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 4200);
+    }
+
+    function resetOptInForm() {
+      document.getElementById('alerts-success-state').classList.add('hidden');
+      document.getElementById('alerts-optin-form').classList.remove('hidden');
+    }
+
+    /**
+     * =========================================================================
+     * 9. MOBILE MENU & EVENT LISTENERS SETUP
+     * =========================================================================
+     */
+    function closeMobileMenu() {
+      const menu = document.getElementById('mobile-menu');
+      const btn = document.getElementById('mobile-menu-btn');
+      const ham = document.getElementById('hamburger-icon');
+      const closeIc = document.getElementById('close-icon');
+      menu.classList.add('hidden');
+      btn.setAttribute('aria-expanded', 'false');
+      ham.classList.remove('hidden');
+      closeIc.classList.add('hidden');
+    }
+
+    function initEventListeners() {
+      // Mobile Navigation Toggle
+      const mobileBtn = document.getElementById('mobile-menu-btn');
+      const mobileMenu = document.getElementById('mobile-menu');
+      const hamIcon = document.getElementById('hamburger-icon');
+      const closeIcon = document.getElementById('close-icon');
+
+      if (mobileBtn) {
+        mobileBtn.addEventListener('click', () => {
+          const isHidden = mobileMenu.classList.contains('hidden');
+          mobileMenu.classList.toggle('hidden');
+          mobileBtn.setAttribute('aria-expanded', String(isHidden));
+          hamIcon.classList.toggle('hidden', isHidden);
+          closeIcon.classList.toggle('hidden', !isHidden);
+        });
+      }
+
+      document.querySelectorAll('.mobile-nav-link').forEach((link) => {
+        link.addEventListener('click', closeMobileMenu);
+      });
+
+      // Open Now Filter Toggle
+      const openToggle = document.getElementById('open-now-toggle');
+      const openKnob = document.getElementById('open-toggle-knob');
+      if (openToggle) {
+        openToggle.addEventListener('change', (e) => {
+          state.openNowOnly = e.target.checked;
+          if (openKnob) {
+            openKnob.style.transform = state.openNowOnly ? 'translate(20px, 3px)' : 'translate(2px, 3px)';
+          }
+          updateAllViews();
+        });
+      }
+
+      // Live Search Input
+      const searchInput = document.getElementById('truck-search-input');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          state.searchQuery = e.target.value;
+          updateAllViews();
+        });
+      }
+
+      // Push Notification Interactive Toggle
+      const pushBtn = document.getElementById('push-toggle-btn');
+      const pushKnob = document.getElementById('push-toggle-knob');
+      const pushBadge = document.getElementById('push-icon-badge');
+      const pushStatusText = document.getElementById('push-status-text');
+
+      if (pushBtn) {
+        pushBtn.addEventListener('click', () => {
+          state.pushEnabled = !state.pushEnabled;
+          pushBtn.setAttribute('aria-checked', String(state.pushEnabled));
+
+          if (state.pushEnabled) {
+            pushBtn.classList.remove('bg-white/20');
+            pushBtn.classList.add('bg-fresh');
+            pushKnob.classList.add('translate-x-5');
+            pushBadge.classList.remove('bg-white/10', 'text-white/70');
+            pushBadge.classList.add('bg-fresh/20', 'text-fresh');
+            pushStatusText.textContent = 'Push alerts armed! You’ll get live nearby truck pings.';
+            pushStatusText.classList.remove('text-white/60');
+            pushStatusText.classList.add('text-fresh');
+            showToast('Live browser push alerts enabled for your favorite trucks!', 'success');
+          } else {
+            pushBtn.classList.add('bg-white/20');
+            pushBtn.classList.remove('bg-fresh');
+            pushKnob.classList.remove('translate-x-5');
+            pushBadge.classList.add('bg-white/10', 'text-white/70');
+            pushBadge.classList.remove('bg-fresh/20', 'text-fresh');
+            pushStatusText.textContent = 'Instant ping when a nearby truck goes live.';
+            pushStatusText.classList.add('text-white/60');
+            pushStatusText.classList.remove('text-fresh');
+          }
+        });
+      }
+
+      // Opt-In Form Submission & Validation
+      const form = document.getElementById('alerts-optin-form');
+      const emailInput = document.getElementById('optin-email');
+      const emailErr = document.getElementById('email-error-msg');
+      const successBox = document.getElementById('alerts-success-state');
+      const successSummary = document.getElementById('alerts-success-summary');
+
+      if (form) {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const emailVal = emailInput.value.trim();
+          const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal);
+
+          if (!isValidEmail) {
+            emailErr.classList.remove('hidden');
+            emailInput.classList.add('border-amberwarm');
+            emailInput.focus();
+            return;
+          }
+
+          emailErr.classList.add('hidden');
+          emailInput.classList.remove('border-amberwarm');
+
+          const selectedCuisines = Array.from(form.querySelectorAll('input[name="cuisine"]:checked')).map(
+            (cb) => cb.value
+          );
+          const cuisineText = selectedCuisines.length > 0 ? selectedCuisines.join(', ') : 'All Local Trucks';
+          const pushText = state.pushEnabled ? 'with real-time push alerts active' : 'via email digest';
+
+          successSummary.textContent = `We've registered ${emailVal} for ${cuisineText} updates ${pushText}. Watch your inbox on launch day!`;
+          form.classList.add('hidden');
+          successBox.classList.remove('hidden');
+          showToast('Welcome to Truck Spot! Your $5 launch credit is reserved.', 'success');
+        });
+      }
+
+      // Close modals on backdrop click or Escape key
+      ['full-menu-modal', 'brand-assets-modal'].forEach((id) => {
+        const modal = document.getElementById(id);
+        if (modal) {
+          modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+              if (id === 'full-menu-modal') closeMenuModal();
+              else closeBrandModal();
+            }
+          });
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          closeMenuModal();
+          closeBrandModal();
+        }
+      });
+    }
+
+    /**
+     * =========================================================================
+     * 10. BOOTSTRAP ON WINDOW LOAD
+     * =========================================================================
+     */
+    window.addEventListener('load', () => {
+      initEventListeners();
+      updateAllViews();
+      initInteractiveMap();
+    });
+  </script>
+</body>
+</html>
